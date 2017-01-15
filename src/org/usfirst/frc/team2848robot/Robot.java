@@ -1,80 +1,104 @@
 package org.usfirst.frc.team2848robot;
 
+import org.opencv.core.Rect;
+import org.opencv.imgproc.Imgproc;
+
+import edu.wpi.cscore.UsbCamera;
+import edu.wpi.first.wpilibj.CameraServer;
+import edu.wpi.first.wpilibj.GenericHID.Hand;
 import edu.wpi.first.wpilibj.IterativeRobot;
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.RobotDrive;
+import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.vision.VisionThread;
 
-/**
- * The VM is configured to automatically run this class, and to call the
- * functions corresponding to each mode, as described in the IterativeRobot
- * documentation. If you change the name of this class or the package after
- * creating this project, you must also update the manifest file in the resource
- * directory.
- */
 public class Robot extends IterativeRobot {
-	final String defaultAuto = "Default";
-	final String customAuto = "My Auto";
-	String autoSelected;
-	SendableChooser<String> chooser = new SendableChooser<>();
-
-	/**
-	 * This function is run when the robot is first started up and should be
-	 * used for any initialization code.
-	 */
+	
+	private static final int IMG_WIDTH = 160;
+	private static final int IMG_HEIGHT = 120;
+	
+	private static VisionThread visionThread;
+	private UsbCamera camera;
+	private double centerX = 0.0;
+	private double centerY = 0.0;
+	private double targetArea = 0.0;
+	
+	private RobotDrive drive;
+	private Joystick xbox;
+	
+	private final Object imgLock = new Object();
+	
 	@Override
 	public void robotInit() {
-		chooser.addDefault("Default Auto", defaultAuto);
-		chooser.addObject("My Auto", customAuto);
-		SmartDashboard.putData("Auto choices", chooser);
+	    camera = CameraServer.getInstance().startAutomaticCapture();
+	    camera.setResolution(IMG_WIDTH, IMG_HEIGHT);
+	    camera.setWhiteBalanceManual(25);
+	    camera.setFPS(15);
+	    camera.setBrightness(0);
+	    camera.setExposureManual(0);
+	    
+	    visionThread = new VisionThread(camera, new Pipeline(), pipeline -> {
+	        if (!pipeline.filterContoursOutput().isEmpty()) {
+	            Rect r = Imgproc.boundingRect(pipeline.filterContoursOutput().get(0));
+	            synchronized (imgLock) {
+	                centerX = 2*r.x + r.width - (IMG_WIDTH/2);
+	                centerY = 2*r.y + r.height - (IMG_HEIGHT/2);
+	                targetArea = r.area();
+	            }
+	        }
+	    });
+	    visionThread.start();
+	        
+	    drive = new RobotDrive(0, 3);
+	    drive.setSafetyEnabled(false);
+	    xbox = new Joystick(0);
 	}
 
-	/**
-	 * This autonomous (along with the chooser code above) shows how to select
-	 * between different autonomous modes using the dashboard. The sendable
-	 * chooser code works with the Java SmartDashboard. If you prefer the
-	 * LabVIEW Dashboard, remove all of the chooser code and uncomment the
-	 * getString line to get the auto name from the text box below the Gyro
-	 *
-	 * You can add additional auto modes by adding additional comparisons to the
-	 * switch structure below with additional strings. If using the
-	 * SendableChooser make sure to add them to the chooser code above as well.
-	 */
 	@Override
 	public void autonomousInit() {
-		autoSelected = chooser.getSelected();
-		// autoSelected = SmartDashboard.getString("Auto Selector",
-		// defaultAuto);
-		System.out.println("Auto selected: " + autoSelected);
 	}
 
-	/**
-	 * This function is called periodically during autonomous
-	 */
 	@Override
 	public void autonomousPeriodic() {
-		switch (autoSelected) {
-		case customAuto:
-			// Put custom auto code here
-			break;
-		case defaultAuto:
-		default:
-			// Put default auto code here
-			break;
-		}
 	}
 
-	/**
-	 * This function is called periodically during operator control
-	 */
 	@Override
 	public void teleopPeriodic() {
+		
+			
+		drive(xbox.getY(Hand.kLeft), xbox.getX(Hand.kLeft));
+		
+		if(xbox.getRawButton(1)) {
+			camera.setExposureManual(0);
+			camera.setBrightness(0);
+			
+			synchronized (imgLock) {
+				SmartDashboard.putNumber("Center X", centerX);
+				SmartDashboard.putNumber("Center Y", centerY);
+				SmartDashboard.putNumber("Area", targetArea);
+				
+				if(Math.abs(centerX) > 3) {
+					if(centerX > 0) {
+						drive(0, 1.0);
+					} else {
+						drive(0, -1.0);
+					}
+				}
+			}
+			
+		} else {
+			camera.setExposureManual(25);
+			camera.setBrightness(25);
+		}
+	}
+	
+	public void drive(double y, double x) {
+		double speed = 0.75;
+		drive.arcadeDrive(-y*speed, -x*speed);
 	}
 
-	/**
-	 * This function is called periodically during test mode
-	 */
 	@Override
 	public void testPeriodic() {
 	}
 }
-
